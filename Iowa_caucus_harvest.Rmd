@@ -1,0 +1,245 @@
+---
+title: "Iowa Caucus results 2020"
+author: "Desi Quintans"
+date: "Compiled `r format(Sys.time(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+librarian::shelf(tidyverse, rvest)
+```
+
+```{r}
+# Some utility functions
+
+drop_blank <- function(vec) {
+    vec[str_length(vec) > 0]
+}
+
+strip_html <- function(vec, replace = ",") {
+    str_replace_all(vec, "(<.*?>\\n<.*?>)|(<.*?>)", ",")
+}
+
+omit_element <- function(vec, regex) {
+    vec[str_detect(vec, regex) == FALSE]
+}
+
+`%notin%` <- function(x, y) {
+    !(x %in% y)
+}
+```
+
+
+## Aim
+
+To turn the Iowa Caucus' HTML page into a dataframe.
+
+
+
+## Import data
+
+```{r}
+compile_time <- format(Sys.time(), '%Y-%m-%dT%H%MZ+10')
+```
+
+
+The time of access is: `r compile_time`.
+
+```{r}
+iowa <- read_html("https://results.thecaucuses.org/")
+```
+
+The HTML file is coded as a list (`<ul>`) that is styled using other technology, it is not coded as a table. Makes it harder to access the information.
+
+
+
+## Build the table header
+
+```{r}
+# The list of candidates comes from the true table header.
+candidates <- 
+    iowa %>% 
+    html_nodes("ul.thead li") %>% 
+    html_text() %>% 
+    drop_blank() %>% 
+    omit_element("County|Precinct")
+
+candidates
+
+
+# The list of measures comes from the table's subheader.
+table_subhead <- 
+    iowa %>% 
+    html_nodes("ul.sub-head li") %>% 
+    html_text() %>% 
+    drop_blank()
+    
+table_subhead
+
+
+# The two can be combined so that the dataframe has only one header row.
+table_header <- 
+    paste(rep(candidates, each = 3), table_subhead, sep = "_") %>% 
+    str_remove_all(" Expression")
+
+table_header
+```
+
+
+## Which precincts belong to which counties?
+
+```{r}
+county_names <- 
+    iowa %>% 
+    html_nodes("div.precinct-rows div.precinct-county div.wrap") %>% 
+    html_text()
+
+county_names
+
+
+# This is a list of 104 nodes, so each element corresponds to each county.
+precinct_data <- 
+    iowa %>% 
+    html_nodes("div.precinct-rows div.precinct-data")
+
+
+# This is the number of rows per county. Note that it is not the number of 
+# *precincts* per county, because it includes the 'total' row for now.
+county_rowcount <- 
+    precinct_data %>% 
+    as.character() %>% 
+    str_count("<li>.*?[A-Z].*?</li>")
+
+county_rowcount
+
+
+# The name of each row, recognised as a list item that has capital letters in 
+# it and not just numbers.
+precinct_names <- 
+    precinct_data %>% 
+    as.character() %>% 
+    str_extract_all("<li>.*?[A-Z].*?</li>", simplify = FALSE) %>% 
+    flatten_chr() %>% 
+    str_remove_all("<.*?>")
+
+
+# A lookup table for matching precincts to counties.
+precinct_table <- 
+    tibble(county = rep(county_names, times = county_rowcount),
+           precinct = precinct_names)
+
+head(precinct_table, 20)
+```
+
+
+## Grab SDE counts per precinct
+
+```{r}
+precinct_counts <- 
+    precinct_data
+
+head(precinct_counts)
+
+precinct_data[[1]]
+```
+
+
+## Format SDE counts as a table
+
+```{r}
+precinct_counts <- 
+    precinct_data %>% 
+    as.character() %>% 
+    # Every precinct in a county is currently on a single line. Split each 
+    # precinct into its own element.
+    str_remove_all("\\n") %>% 
+    str_split("<ul.*?>") %>% 
+    # Flatten into an atomic Char vector and remove non-data HTML elements
+    flatten_chr() %>% 
+    str_remove_all("<li>|</div>|</ul>") %>% 
+    omit_element("^<div") %>% 
+    # Format each line for reading-in as delimited values. Values are delimited
+    # with ? because both , and ; are used in precinct names.
+    str_replace_all("</li>", " ? ") %>% 
+    str_remove("\\? $") %>% 
+    # Create a dataframe from it
+    read_delim(., delim = "?", col_names = prepend(table_header, "precinct")) %>% 
+    mutate_all(str_trim)
+
+head(precinct_counts)
+```
+
+
+## Merge the counts with the counties
+
+```{r}
+# If the precinct names are the same and occur in the same order, then the 
+# two dataframes can simply be column-bound.
+if (identical(precinct_table$precinct, precinct_counts$precinct)) {
+    clean_results <- 
+        bind_cols(precinct_table, select(precinct_counts, -precinct)) %>%
+        mutate_at(vars(-(county:precinct)), parse_number) %>% 
+        mutate_at(vars(matches("First|Final")), as.integer)
+} else {
+    stop("The row order of 'precinct_table' and 'precinct_counts' is not identical.")
+}
+
+glimpse(clean_results)
+```
+
+
+
+## Pivot into long format
+
+
+```{r}
+tidy_result <- 
+    clean_results %>% 
+    pivot_longer(-(county:precinct)) %>% 
+    separate(name, into = c("candidate", "measure")) %>% 
+    mutate(measure = recode(measure, 
+                            First = "expression_1", 
+                            Final = "expression_2",
+                            SDE = "sde"))
+```
+
+
+## Recalculate totals
+
+```{r}
+new_totals <- 
+    tidy_result %>% 
+    filter(precinct != "Total") %>% 
+    group_by(county, candidate, measure) %>% 
+    summarise(Total_recalc = sum(value)) %>% 
+    ungroup() %>% 
+    pivot_longer(Total_recalc, names_to = "precinct", values_to = "value")
+
+
+recalculated <- 
+    full_join(tidy_result, new_totals) %>% 
+    arrange(county, precinct, candidate, measure)
+```
+
+
+## Are there any totalling errors?
+
+```{r}
+recalculated %>% 
+    filter(str_detect(precinct, "Total")) %>% 
+    pivot_wider(names_from = "precinct", values_from = "value") %>% 
+    filter(near(Total, Total_recalc) == FALSE) %>% 
+    print()
+```
+
+
+## Output
+
+```{r}
+write_csv(recalculated, paste0("_compiled/", compile_time, ".csv"))
+
+recalculated
+```
+
