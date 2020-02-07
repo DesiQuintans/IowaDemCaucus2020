@@ -280,8 +280,8 @@ perm_names
 
 ```{r}
 pairwise_identical <- 
-    map(perms, ~ identical(pluck(all_snapshots, ..1[[1]]),
-                           pluck(all_snapshots, ..1[[2]]))) %>% 
+    map(perms, ~ identical(pluck(snapshot_dfs, ..1[[1]]),
+                           pluck(snapshot_dfs, ..1[[2]]))) %>% 
     set_names(perm_names)
 
 pairwise_identical
