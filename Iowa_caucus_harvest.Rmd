@@ -32,11 +32,13 @@ omit_element <- function(vec, regex) {
 ```
 
 
-## Aim
+# Aim
 
 To turn the Iowa Caucus' HTML page into a dataframe.
 
 
+
+# Generate a snapshot of the current results
 
 ## Import data
 
@@ -241,5 +243,47 @@ recalculated %>%
 write_csv(recalculated, paste0("_compiled/", compile_time, ".csv"))
 
 recalculated
+```
+
+
+
+# Pairwise comparison of all results
+
+It is possible that snapshots that were downloaded hours apart have no differences between them. Which snapshots should be looked at, and which ones are unchanged and can be ignored?
+
+## Import all snapshots
+
+```{r}
+snapshots <- list.files("_compiled", full.names = TRUE)
+
+snapshots
+
+snapshot_dfs <- map(set_names(snapshots), 
+                    ~ read_csv(.x, col_types = "ccccd"))
+```
+
+
+
+## Work out combinations
+
+```{r}
+perms <- 
+    combn(snapshots, m = 2, simplify = FALSE)
+
+perm_names <- map_chr(perms, ~ paste(..1[1], ..1[2], sep = " == "))
+
+perm_names
+```
+
+
+## Are the dataframes identical?
+
+```{r}
+pairwise_identical <- 
+    map(perms, ~ identical(pluck(all_snapshots, ..1[[1]]),
+                           pluck(all_snapshots, ..1[[2]]))) %>% 
+    set_names(perm_names)
+
+pairwise_identical
 ```
 
