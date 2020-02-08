@@ -5,7 +5,7 @@ Scraped copies of the results of the 2020 Iowa Democratic Caucus from <https://r
 
 ## Contents
 
-- `Iowa_caucus_harvest.Rmd`: The script that scrapes <https://results.thecaucuses.org/> and produces a tidy dataframe of the results.
+- `Iowa_caucus_harvest.Rmd`: The script that scrapes <https://results.thecaucuses.org/> and produces a tidy dataframe of the results. See the end of the file for a pairwise comparison of whether each snapshot is identical to the others (i.e. no changes to the data).
     - `Iowa_caucus_harvest [timestamp].Rmd`: Finished runs of the above.
 - `_compiled/`: Output folder of timestamped caucus results, in 'long' format.
     - **county**: County name
